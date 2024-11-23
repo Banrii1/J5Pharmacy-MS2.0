@@ -16,6 +16,8 @@ import ActionButtons from '../../../core/components/ActionButtons';
 import DiscountDialog from '../components/DiscountDialog';
 import TransactionSummary from '../components/TransactionSummary/TransactionSummary';
 import { CheckoutDialog } from '../components/CheckoutDialog/CheckoutDialog';
+import NewTransactionDialog from '../components/NewTransactionDialog/NewTransactionDialog';
+import HeldTransactionsDialog, { HeldTransaction } from '../components/HeldTransactions/HeldTransactionsDialog';
 import DevTools from '../../../devtools/DevTools';
 
 // Import types and utilities
@@ -35,23 +37,19 @@ const generateTransactionId = (branchId: string = 'B001'): string => {
 const POSPage: React.FC = () => {
   const { logout } = useAuth();
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [transactionId] = useState<string>(() => generateTransactionId());
+  const [transactionId, setTransactionId] = useState<string>(() => generateTransactionId());
   const [customerId, setCustomerId] = useState<string>();
   const [customerName, setCustomerName] = useState<string>();
   const [starPointsId, setStarPointsId] = useState<string>();
   const [discountType, setDiscountType] = useState<DiscountType>('None');
-  const [heldTransactions, setHeldTransactions] = useState<{
-    id: string;
-    items: CartItem[];
-    customerId?: string;
-    customerName?: string;
-    starPointsId?: string;
-    discountType: DiscountType;
-  }[]>([]);
+  const [heldTransactions, setHeldTransactions] = useState<HeldTransaction[]>([]);
+  const [heldTransactionDialogOpen, setHeldTransactionDialogOpen] = useState(false);
+  const [heldTransactionMode, setHeldTransactionMode] = useState<'hold' | 'recall'>('hold');
   const [discountDialogOpen, setDiscountDialogOpen] = useState(false);
   const [customDiscountValue, setCustomDiscountValue] = useState<number>();
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [starPointsEarned, setStarPointsEarned] = useState(0);
+  const [newTransactionDialogOpen, setNewTransactionDialogOpen] = useState(false);
 
   const {
     subtotal,
@@ -60,6 +58,23 @@ const POSPage: React.FC = () => {
     vat,
     total
   } = calculateTotals(cartItems, discountType, customDiscountValue);
+
+  const handleProductSelect = (product: any) => {
+    const newItem: CartItem = {
+      id: product.id,
+      itemCode: product.itemCode,
+      productName: product.productName,
+      price: product.price,
+      quantity: 1,
+      unit: product.unit,
+      category: product.category,
+      barcode: product.barcode,
+      brand: product.brand,
+      dosage: product.dosage,
+      requiresPrescription: product.requiresPrescription
+    };
+    setCartItems([...cartItems, newItem]);
+  };
 
   const handleDiscountClick = () => {
     setDiscountDialogOpen(true);
@@ -134,6 +149,77 @@ const POSPage: React.FC = () => {
     setCartItems([...cartItems, ...sampleItems]);
   };
 
+  const handleNewTransaction = () => {
+    setNewTransactionDialogOpen(true);
+  };
+
+  const handleNewTransactionConfirm = () => {
+    // Clear all transaction data
+    setCartItems([]);
+    setTransactionId(generateTransactionId());
+    setCustomerId(undefined);
+    setCustomerName(undefined);
+    setStarPointsId(undefined);
+    setDiscountType('None');
+    setNewTransactionDialogOpen(false);
+  };
+
+  const handleHoldTransaction = () => {
+    if (cartItems.length === 0) {
+      // Show error message or notification
+      return;
+    }
+    setHeldTransactionMode('hold');
+    setHeldTransactionDialogOpen(true);
+  };
+
+  const handleRecallTransactions = () => {
+    setHeldTransactionMode('recall');
+    setHeldTransactionDialogOpen(true);
+  };
+
+  const handleHoldConfirm = (note: string) => {
+    const heldTransaction: HeldTransaction = {
+      id: `HELD-${format(new Date(), 'yyyyMMdd-HHmmss')}`,
+      items: [...cartItems],
+      customerId,
+      customerName,
+      starPointsId,
+      discountType,
+      note,
+      timestamp: new Date(),
+    };
+    setHeldTransactions([...heldTransactions, heldTransaction]);
+    // Clear current transaction
+    handleNewTransactionConfirm();
+    setHeldTransactionDialogOpen(false);
+  };
+
+  const handleRecallTransaction = (transaction: HeldTransaction) => {
+    // Confirm if current transaction has items
+    if (cartItems.length > 0) {
+      // Show confirmation dialog
+      if (!window.confirm('Current transaction will be cleared. Continue?')) {
+        return;
+      }
+    }
+    
+    // Restore transaction data
+    setCartItems(transaction.items);
+    setCustomerId(transaction.customerId);
+    setCustomerName(transaction.customerName);
+    setStarPointsId(transaction.starPointsId);
+    setDiscountType(transaction.discountType);
+    
+    // Remove from held transactions
+    setHeldTransactions(heldTransactions.filter(t => t.id !== transaction.id));
+    setHeldTransactionDialogOpen(false);
+  };
+
+  const handleDeleteHeldTransaction = (transactionId: string) => {
+    setHeldTransactions(heldTransactions.filter(t => t.id !== transactionId));
+  };
+
   useEffect(() => {
     const totals = calculateTotals(cartItems, discountType, customDiscountValue);
     setStarPointsEarned(Math.floor(totals.total / 200));
@@ -162,7 +248,14 @@ const POSPage: React.FC = () => {
         {/* Function Keys */}
         <Grid item xs={2}>
           <Paper elevation={2} sx={{ height: '100%', overflow: 'hidden' }}>
-            <FunctionKeys onLogout={logout} />
+            <FunctionKeys 
+              onLogout={logout}
+              onProductSelect={handleProductSelect}
+              onNewTransaction={handleNewTransaction}
+              onHoldTransaction={handleHoldTransaction}
+              onRecallTransactions={handleRecallTransactions}
+              hasHeldTransactions={heldTransactions.length > 0}
+            />
           </Paper>
         </Grid>
         {/* Cart Section */}
@@ -216,6 +309,12 @@ const POSPage: React.FC = () => {
         onResetStock={() => {}}
         onClearCart={() => setCartItems([])}
       />
+      <NewTransactionDialog
+        open={newTransactionDialogOpen}
+        onClose={() => setNewTransactionDialogOpen(false)}
+        onConfirm={handleNewTransactionConfirm}
+        hasItems={cartItems.length > 0}
+      />
       <DiscountDialog
         open={discountDialogOpen}
         onClose={() => setDiscountDialogOpen(false)}
@@ -235,6 +334,26 @@ const POSPage: React.FC = () => {
         starPointsEarned={starPointsEarned}
         onCheckout={handleCheckoutComplete}
         onClearCart={() => setCartItems([])}
+      />
+      <HeldTransactionsDialog
+        open={heldTransactionDialogOpen}
+        onClose={() => setHeldTransactionDialogOpen(false)}
+        mode={heldTransactionMode}
+        heldTransactions={heldTransactions}
+        onRecall={handleRecallTransaction}
+        onDelete={handleDeleteHeldTransaction}
+        onHold={handleHoldConfirm}
+        currentTransaction={
+          heldTransactionMode === 'hold'
+            ? {
+                items: cartItems,
+                customerId,
+                customerName,
+                starPointsId,
+                discountType,
+              }
+            : undefined
+        }
       />
     </Box>
   );
